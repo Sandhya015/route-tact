@@ -23,8 +23,18 @@
       "dest": "/frontend/assets/$1"
     },
     {
-      "src": "/(.*\\.(js|css|ico|png|jpg|jpeg|svg|woff|woff2|ttf|eot|json))",
-      "dest": "/frontend/$1"
+      "src": "/(.*\\.js)",
+      "dest": "/frontend/$1",
+      "headers": {
+        "Content-Type": "application/javascript"
+      }
+    },
+    {
+      "src": "/(.*\\.css)",
+      "dest": "/frontend/$1",
+      "headers": {
+        "Content-Type": "text/css"
+      }
     },
     {
       "src": "/(.*)",

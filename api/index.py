@@ -438,7 +438,25 @@ from http.server import BaseHTTPRequestHandler
 class handler(BaseHTTPRequestHandler):
     """Vercel serverless function handler - BaseHTTPRequestHandler format"""
     
-    def handle_request(self):
+    def do_GET(self):
+        self._handle_request()
+    
+    def do_POST(self):
+        self._handle_request()
+    
+    def do_PUT(self):
+        self._handle_request()
+    
+    def do_PATCH(self):
+        self._handle_request()
+    
+    def do_DELETE(self):
+        self._handle_request()
+    
+    def do_OPTIONS(self):
+        self._handle_request()
+    
+    def _handle_request(self):
         """Handle all HTTP methods"""
         try:
             # Extract path

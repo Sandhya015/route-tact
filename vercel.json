@@ -19,22 +19,7 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/assets/(.*)",
-      "dest": "/frontend/assets/$1"
-    },
-    {
-      "src": "/(.*\\.js)",
-      "dest": "/frontend/$1",
-      "headers": {
-        "Content-Type": "application/javascript"
-      }
-    },
-    {
-      "src": "/(.*\\.css)",
-      "dest": "/frontend/$1",
-      "headers": {
-        "Content-Type": "text/css"
-      }
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",

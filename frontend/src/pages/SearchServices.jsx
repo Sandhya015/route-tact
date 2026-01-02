@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { Search, MapPin, Phone, MessageCircle, Tractor, Wrench, Truck } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 
 const SearchServices = () => {
   const [services, setServices] = useState([])
@@ -12,6 +13,7 @@ const SearchServices = () => {
   const [location, setLocation] = useState({ lat: null, lng: null })
   const [showSuggestions, setShowSuggestions] = useState(true)
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   const API_URL = import.meta.env.VITE_API_URL || '/api'
 
@@ -37,23 +39,37 @@ const SearchServices = () => {
         }
       )
     }
-    
-    // Load auto-suggestions based on user's location (village/district)
-    loadSuggestions()
   }, [])
 
+  useEffect(() => {
+    // Load suggestions when user is available
+    if (user && user._id) {
+      loadSuggestions()
+    }
+  }, [user])
+
   const loadSuggestions = async () => {
+    if (!user || !user._id) {
+      console.log('User not loaded yet')
+      return
+    }
+    
     try {
       const token = localStorage.getItem('token')
       const response = await axios.get(`${API_URL}/services/suggestions`, {
+        params: {
+          userId: user._id
+        },
         headers: { Authorization: `Bearer ${token}` }
       })
-      if (response.data.suggestions && response.data.suggestions.length > 0) {
-        setSuggestions(response.data.suggestions)
+      // API returns array directly, not wrapped in suggestions object
+      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+        setSuggestions(response.data)
         setShowSuggestions(true)
       }
     } catch (error) {
       console.error('Error loading suggestions:', error)
+      console.error('Error details:', error.response?.data)
     }
   }
 
@@ -65,19 +81,23 @@ const SearchServices = () => {
 
     setLoading(true)
     try {
+      const token = localStorage.getItem('token')
       const response = await axios.get(`${API_URL}/services/search`, {
         params: {
           lat: location.lat,
           lng: location.lng,
           type: serviceType,
           search: searchTerm,
-          radius: 10 // 10km radius
-        }
+          radius: 50 // 50km radius
+        },
+        headers: { Authorization: `Bearer ${token}` }
       })
-      setServices(response.data)
+      setServices(response.data || [])
+      setShowSuggestions(false) // Hide suggestions after search
     } catch (error) {
       console.error('Search error:', error)
-      alert('Failed to search services')
+      console.error('Error details:', error.response?.data)
+      alert('Failed to search services: ' + (error.response?.data?.message || error.message))
     } finally {
       setLoading(false)
     }

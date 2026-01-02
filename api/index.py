@@ -226,76 +226,62 @@ def get_suggestions():
         if db is None:
             return jsonify({'message': 'Database connection failed'}), 500
         
-        payload = get_user_from_token(request)
-        if not payload:
-            return jsonify({'message': 'Unauthorized'}), 401
+        user_id = request.args.get('userId')
+        if not user_id:
+            return jsonify({'message': 'User ID is required'}), 400
         
-        user = db.users.find_one({'_id': ObjectId(payload['user_id'])})
+        user = db.users.find_one({'_id': ObjectId(user_id)})
         if not user:
             return jsonify({'message': 'User not found'}), 404
         
         user_village = user.get('village', '')
         user_district = user.get('district', '')
         
-        same_location_services = list(db.services.find({
-            'available': True,
-            'village': user_village,
-            'district': user_district
-        }).limit(10))
-        
-        same_district_services = list(db.services.find({
-            'available': True,
-            'district': user_district,
-            'village': {'$ne': user_village}
-        }).limit(10))
-        
         suggestions = []
-        seen_providers = set()
         
-        for service in same_location_services:
-            provider = db.users.find_one({'_id': ObjectId(service['providerId'])})
-            if provider and str(service['providerId']) not in seen_providers:
-                seen_providers.add(str(service['providerId']))
-                suggestions.append({
-                    '_id': str(service['_id']),
-                    'type': service.get('type', ''),
-                    'providerName': provider.get('name', 'Unknown'),
-                    'phone': provider.get('phone', ''),
-                    'village': service.get('village', ''),
-                    'district': service.get('district', ''),
-                    'pricePerHour': service.get('pricePerHour'),
-                    'pricePerTrip': service.get('pricePerTrip'),
-                    'description': service.get('description', ''),
-                    'matchType': 'same_location',
-                    'matchText': 'Same Location - ' + user_village
-                })
-        
-        for service in same_district_services:
-            provider = db.users.find_one({'_id': ObjectId(service['providerId'])})
-            if provider and str(service['providerId']) not in seen_providers:
-                seen_providers.add(str(service['providerId']))
-                suggestions.append({
-                    '_id': str(service['_id']),
-                    'type': service.get('type', ''),
-                    'providerName': provider.get('name', 'Unknown'),
-                    'phone': provider.get('phone', ''),
-                    'village': service.get('village', ''),
-                    'district': service.get('district', ''),
-                    'pricePerHour': service.get('pricePerHour'),
-                    'pricePerTrip': service.get('pricePerTrip'),
-                    'description': service.get('description', ''),
-                    'matchType': 'nearby',
-                    'matchText': 'Nearby - ' + service.get('village', '') + ', ' + user_district
-                })
-        
-        return jsonify({
-            'suggestions': suggestions,
-            'userLocation': {
+        # Find providers in same village
+        if user_village:
+            same_village_providers = db.users.find({
+                'role': 'provider',
                 'village': user_village,
-                'district': user_district
-            },
-            'total': len(suggestions)
-        }), 200
+                '_id': {'$ne': ObjectId(user_id)}
+            })
+            for provider in same_village_providers:
+                provider_services = db.services.find({
+                    'providerId': provider['_id'],
+                    'available': True
+                })
+                for service in provider_services:
+                    service_data = format_service_response(service, 0, 0)
+                    service_data['providerName'] = provider.get('name', 'Unknown')
+                    service_data['phone'] = provider.get('phone', '')
+                    service_data['matchType'] = 'same_location'
+                    service_data['matchText'] = f'Same Location - {user_village}'
+                    suggestions.append(service_data)
+        
+        # Find providers in same district
+        if user_district:
+            same_district_providers = db.users.find({
+                'role': 'provider',
+                'district': user_district,
+                '_id': {'$ne': ObjectId(user_id)}
+            })
+            for provider in same_district_providers:
+                already_suggested = any(s.get('providerId') == str(provider['_id']) for s in suggestions)
+                if not already_suggested:
+                    provider_services = db.services.find({
+                        'providerId': provider['_id'],
+                        'available': True
+                    })
+                    for service in provider_services:
+                        service_data = format_service_response(service, 0, 0)
+                        service_data['providerName'] = provider.get('name', 'Unknown')
+                        service_data['phone'] = provider.get('phone', '')
+                        service_data['matchType'] = 'nearby'
+                        service_data['matchText'] = f'Nearby - {user_district}'
+                        suggestions.append(service_data)
+        
+        return jsonify(suggestions), 200
         
     except Exception as e:
         return jsonify({'message': str(e)}), 500
@@ -445,25 +431,20 @@ def update_or_delete_service(service_id):
 
 # Vercel serverless function handler
 def handler(req):
-    """Vercel serverless function handler"""
-    from werkzeug.wrappers import Request, Response
+    """Vercel serverless function handler - simplified format"""
+    # Vercel passes a request object with: method, path, headers, body
+    # We need to convert it to WSGI format for Flask
     
-    # Extract path from request
-    if hasattr(req, 'path'):
-        path = req.path
-    elif isinstance(req, dict):
-        path = req.get('path', '/')
-    else:
-        path = '/'
+    method = getattr(req, 'method', 'GET')
+    path = getattr(req, 'path', '/')
+    headers = getattr(req, 'headers', {})
+    body = getattr(req, 'body', None)
     
     # Remove /api prefix if present
     if path.startswith('/api'):
         path = path[4:] or '/'
     
     # Build WSGI environ
-    method = req.method if hasattr(req, 'method') else req.get('method', 'GET')
-    headers = req.headers if hasattr(req, 'headers') else req.get('headers', {})
-    
     environ = {
         'REQUEST_METHOD': method,
         'PATH_INFO': path,
@@ -488,34 +469,31 @@ def handler(req):
             environ[key_upper] = value
     
     # Handle body
-    body = None
-    if hasattr(req, 'body'):
-        body = req.body
-    elif isinstance(req, dict) and 'body' in req:
-        body = req['body']
-    
     if body:
         if isinstance(body, str):
             body = body.encode('utf-8')
         environ['wsgi.input'] = body
         environ['CONTENT_LENGTH'] = str(len(body))
     
-    # Process request
-    with Request(environ) as werkzeug_req:
-        with app.request_context(environ):
-            try:
-                response = app.full_dispatch_request()
-                return {
-                    'statusCode': response.status_code,
-                    'headers': dict(response.headers),
-                    'body': response.get_data(as_text=True)
-                }
-            except Exception as e:
-                import traceback
-                error_msg = str(e)
-                traceback.print_exc()
-                return {
-                    'statusCode': 500,
-                    'headers': {'Content-Type': 'application/json'},
-                    'body': json.dumps({'message': error_msg, 'error': 'Internal server error'})
-                }
+    # Process with Flask
+    with app.request_context(environ):
+        try:
+            response = app.full_dispatch_request()
+            return {
+                'statusCode': response.status_code,
+                'headers': dict(response.headers),
+                'body': response.get_data(as_text=True)
+            }
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error in handler: {error_trace}")
+            return {
+                'statusCode': 500,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({
+                    'message': str(e),
+                    'error': 'Internal server error',
+                    'trace': error_trace
+                })
+            }

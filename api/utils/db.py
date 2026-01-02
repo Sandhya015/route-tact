@@ -34,11 +34,15 @@ def get_db():
         print("Warning: MONGODB_URI not set, using default (will fail if not local MongoDB)")
     
     try:
-        # Create connection
+        # Create connection with SSL/TLS configuration for MongoDB Atlas
         _client = MongoClient(
             MONGODB_URI,
-            serverSelectionTimeoutMS=5000,  # 5 second timeout
-            connectTimeoutMS=5000
+            serverSelectionTimeoutMS=10000,  # 10 second timeout
+            connectTimeoutMS=10000,
+            tls=True,
+            tlsAllowInvalidCertificates=False,
+            retryWrites=True,
+            w='majority'
         )
         
         # Test connection

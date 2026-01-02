@@ -438,24 +438,6 @@ from http.server import BaseHTTPRequestHandler
 class handler(BaseHTTPRequestHandler):
     """Vercel serverless function handler - BaseHTTPRequestHandler format"""
     
-    def do_GET(self):
-        self.handle_request()
-    
-    def do_POST(self):
-        self.handle_request()
-    
-    def do_PUT(self):
-        self.handle_request()
-    
-    def do_PATCH(self):
-        self.handle_request()
-    
-    def do_DELETE(self):
-        self.handle_request()
-    
-    def do_OPTIONS(self):
-        self.handle_request()
-    
     def handle_request(self):
         """Handle all HTTP methods"""
         try:

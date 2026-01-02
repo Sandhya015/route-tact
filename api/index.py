@@ -28,8 +28,9 @@ from bson import ObjectId
 app = Flask(__name__)
 CORS(app)
 
-# Test route
+# Test route - also handle root path for debugging
 @app.route('/api/test', methods=['GET'])
+@app.route('/test', methods=['GET'])
 def test():
     db = get_db()
     if db is not None:

@@ -433,12 +433,41 @@ def update_or_delete_service(service_id):
 # Vercel serverless function handler
 def handler(req):
     """Vercel serverless function handler"""
-    # Use Flask's test client for better compatibility
+    # Extract request details from Vercel request object
+    if hasattr(req, 'path'):
+        path = req.path
+    elif isinstance(req, dict):
+        path = req.get('path', '/')
+    else:
+        path = '/'
+    
+    # Get method
+    method = req.method if hasattr(req, 'method') else (req.get('method', 'GET') if isinstance(req, dict) else 'GET')
+    
+    # Get headers
+    headers = req.headers if hasattr(req, 'headers') else (req.get('headers', {}) if isinstance(req, dict) else {})
+    
+    # Get body
+    body = None
+    if hasattr(req, 'body'):
+        body = req.body
+    elif isinstance(req, dict):
+        body = req.get('body')
+    
+    # Get query string
+    query_string = ''
+    if hasattr(req, 'query'):
+        query_string = '&'.join([f'{k}={v}' for k, v in req.query.items()])
+    elif isinstance(req, dict) and 'query' in req:
+        query_string = '&'.join([f'{k}={v}' for k, v in req['query'].items()])
+    
+    # Use Flask's test request context
     with app.test_request_context(
-        path=req.path if hasattr(req, 'path') else '/',
-        method=req.method if hasattr(req, 'method') else 'GET',
-        headers=req.headers if hasattr(req, 'headers') else {},
-        data=req.body if hasattr(req, 'body') else None
+        path=path,
+        method=method,
+        headers=headers,
+        data=body,
+        query_string=query_string
     ):
         try:
             response = app.full_dispatch_request()
@@ -456,6 +485,7 @@ def handler(req):
                 'headers': {'Content-Type': 'application/json'},
                 'body': json.dumps({
                     'message': str(e),
-                    'error': 'Internal server error'
+                    'error': 'Internal server error',
+                    'trace': error_trace
                 })
             }

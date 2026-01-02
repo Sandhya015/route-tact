@@ -435,8 +435,68 @@ def update_or_delete_service(service_id):
         return jsonify({'message': str(e)}), 500
 
 # Vercel serverless function handler
-def handler(request):
-    """Main handler for all API routes"""
-    with app.app_context():
-        return app.full_dispatch_request()
+def handler(req):
+    """Main handler for all API routes - Vercel format"""
+    from werkzeug.wrappers import Request
+    
+    # Get path from request
+    path = req.path if hasattr(req, 'path') else req.get('path', '/')
+    
+    # Remove /api prefix if present (Vercel already routes to /api)
+    if path.startswith('/api'):
+        path = path[4:] or '/'
+    
+    # Build WSGI environ
+    environ = {
+        'REQUEST_METHOD': req.method if hasattr(req, 'method') else req.get('method', 'GET'),
+        'PATH_INFO': path,
+        'QUERY_STRING': '',
+        'SERVER_NAME': 'localhost',
+        'SERVER_PORT': '80',
+        'wsgi.version': (1, 0),
+        'wsgi.url_scheme': 'https',
+        'wsgi.input': None,
+        'wsgi.errors': None,
+        'wsgi.multithread': False,
+        'wsgi.multiprocess': True,
+        'wsgi.run_once': False,
+    }
+    
+    # Add headers
+    headers = req.headers if hasattr(req, 'headers') else req.get('headers', {})
+    for key, value in headers.items():
+        key_upper = key.upper().replace('-', '_')
+        if key_upper not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
+            environ['HTTP_' + key_upper] = value
+        else:
+            environ[key_upper] = value
+    
+    # Add body if present
+    if hasattr(req, 'body'):
+        body = req.body
+    elif 'body' in req:
+        body = req['body']
+    else:
+        body = None
+    
+    if body:
+        environ['wsgi.input'] = body
+        environ['CONTENT_LENGTH'] = str(len(body) if isinstance(body, (str, bytes)) else 0)
+    
+    # Create request and process
+    with Request(environ) as werkzeug_req:
+        with app.request_context(environ):
+            try:
+                response = app.full_dispatch_request()
+                return {
+                    'statusCode': response.status_code,
+                    'headers': dict(response.headers),
+                    'body': response.get_data(as_text=True)
+                }
+            except Exception as e:
+                return {
+                    'statusCode': 500,
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps({'message': str(e), 'error': 'Internal server error'})
+                }
 

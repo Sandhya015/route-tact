@@ -6,6 +6,13 @@ from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 _client = None
 _db = None
 
+# Load environment variables (for Vercel)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass  # dotenv not available in Vercel, use env vars directly
+
 def get_db():
     """Get database connection (lazy initialization for serverless)"""
     global _client, _db

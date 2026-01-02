@@ -431,49 +431,58 @@ def update_or_delete_service(service_id):
         return jsonify({'message': str(e)}), 500
 
 # Vercel serverless function handler
-def handler(req):
-    """Vercel serverless function handler"""
-    # Extract request details from Vercel request object
-    if hasattr(req, 'path'):
-        path = req.path
-    elif isinstance(req, dict):
-        path = req.get('path', '/')
+def handler(request):
+    """Vercel serverless function handler - compatible with Vercel Python runtime"""
+    # Vercel passes a request object with specific attributes
+    # Handle both dict and object formats
+    
+    # Extract path
+    if isinstance(request, dict):
+        path = request.get('path', '/')
+        method = request.get('method', 'GET')
+        headers = request.get('headers', {})
+        body = request.get('body', '')
+        query = request.get('query', {})
     else:
-        path = '/'
+        path = getattr(request, 'path', '/')
+        method = getattr(request, 'method', 'GET')
+        headers = getattr(request, 'headers', {})
+        body = getattr(request, 'body', '')
+        query = getattr(request, 'query', {})
     
-    # Get method
-    method = req.method if hasattr(req, 'method') else (req.get('method', 'GET') if isinstance(req, dict) else 'GET')
+    # Build query string
+    query_string = '&'.join([f'{k}={v}' for k, v in query.items()]) if query else ''
     
-    # Get headers
-    headers = req.headers if hasattr(req, 'headers') else (req.get('headers', {}) if isinstance(req, dict) else {})
-    
-    # Get body
-    body = None
-    if hasattr(req, 'body'):
-        body = req.body
-    elif isinstance(req, dict):
-        body = req.get('body')
-    
-    # Get query string
-    query_string = ''
-    if hasattr(req, 'query'):
-        query_string = '&'.join([f'{k}={v}' for k, v in req.query.items()])
-    elif isinstance(req, dict) and 'query' in req:
-        query_string = '&'.join([f'{k}={v}' for k, v in req['query'].items()])
+    # Convert body to bytes if it's a string
+    if isinstance(body, str):
+        body_bytes = body.encode('utf-8')
+    else:
+        body_bytes = body or b''
     
     # Use Flask's test request context
     with app.test_request_context(
         path=path,
         method=method,
         headers=headers,
-        data=body,
+        data=body_bytes,
         query_string=query_string
     ):
         try:
             response = app.full_dispatch_request()
+            
+            # Convert response to Vercel format
+            response_headers = dict(response.headers)
+            # Ensure CORS headers are included
+            if 'Access-Control-Allow-Origin' not in response_headers:
+                response_headers['Access-Control-Allow-Origin'] = '*'
+            if 'Access-Control-Allow-Methods' not in response_headers:
+                response_headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, PATCH, OPTIONS'
+            if 'Access-Control-Allow-Headers' not in response_headers:
+                response_headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            
             return {
                 'statusCode': response.status_code,
-                'headers': dict(response.headers),
+                'headers': response_headers,
                 'body': response.get_data(as_text=True)
             }
         except Exception as e:
@@ -482,10 +491,12 @@ def handler(req):
             print(f"Error in handler: {error_trace}")
             return {
                 'statusCode': 500,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
                 'body': json.dumps({
                     'message': str(e),
-                    'error': 'Internal server error',
-                    'trace': error_trace
+                    'error': 'Internal server error'
                 })
             }

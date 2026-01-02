@@ -1,0 +1,9 @@
+api/auth/
+api/users/
+api/services/
+api/providers/
+api/venv/
+api/__pycache__/
+*.pyc
+__pycache__/
+

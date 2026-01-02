@@ -432,91 +432,115 @@ def update_or_delete_service(service_id):
         return jsonify({'message': str(e)}), 500
 
 # Vercel serverless function handler
-# Vercel expects a handler that receives (req, res) or uses WSGI
-from werkzeug.serving import WSGIRequestHandler
-from werkzeug.wrappers import Request, Response
+# Vercel expects a class that extends BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
 
-def handler(req, res):
-    """Vercel serverless function handler - WSGI compatible"""
-    # Vercel passes req and res objects
-    # Convert to WSGI format for Flask
+class handler(BaseHTTPRequestHandler):
+    """Vercel serverless function handler - BaseHTTPRequestHandler format"""
     
-    # Extract request details
-    if hasattr(req, 'url'):
-        from urllib.parse import urlparse
-        parsed = urlparse(req.url)
-        path = parsed.path
-        query_string = parsed.query
-    else:
-        path = getattr(req, 'path', '/')
-        query_string = getattr(req, 'query', '')
+    def do_GET(self):
+        self.handle_request()
     
-    method = getattr(req, 'method', 'GET')
-    headers = {}
-    if hasattr(req, 'headers'):
-        headers = dict(req.headers)
+    def do_POST(self):
+        self.handle_request()
     
-    # Get body
-    body = b''
-    if hasattr(req, 'body'):
-        body_data = req.body
-        if isinstance(body_data, str):
-            body = body_data.encode('utf-8')
-        elif body_data:
-            body = body_data
+    def do_PUT(self):
+        self.handle_request()
     
-    # Build WSGI environ
-    environ = {
-        'REQUEST_METHOD': method,
-        'PATH_INFO': path,
-        'QUERY_STRING': query_string,
-        'SERVER_NAME': 'localhost',
-        'SERVER_PORT': '80',
-        'wsgi.version': (1, 0),
-        'wsgi.url_scheme': 'https',
-        'wsgi.input': body if body else None,
-        'wsgi.errors': None,
-        'wsgi.multithread': False,
-        'wsgi.multiprocess': True,
-        'wsgi.run_once': False,
-    }
+    def do_PATCH(self):
+        self.handle_request()
     
-    # Add headers to environ
-    for key, value in headers.items():
-        key_upper = key.upper().replace('-', '_')
-        if key_upper not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
-            environ['HTTP_' + key_upper] = value
-        else:
-            environ[key_upper] = value
+    def do_DELETE(self):
+        self.handle_request()
     
-    if body:
-        environ['CONTENT_LENGTH'] = str(len(body))
+    def do_OPTIONS(self):
+        self.handle_request()
     
-    # Process with Flask
-    with app.request_context(environ):
+    def handle_request(self):
+        """Handle all HTTP methods"""
         try:
-            response = app.full_dispatch_request()
+            # Extract path
+            path = self.path.split('?')[0]  # Remove query string
             
-            # Set response
-            res.statusCode = response.status_code
-            for key, value in response.headers:
-                res.setHeader(key, value)
+            # Get query string
+            if '?' in self.path:
+                query_string = self.path.split('?')[1]
+            else:
+                query_string = ''
             
-            # Ensure CORS headers
-            res.setHeader('Access-Control-Allow-Origin', '*')
-            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
-            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            # Get method
+            method = self.command
             
-            res.end(response.get_data(as_text=True))
+            # Get headers
+            headers = {}
+            for key, value in self.headers.items():
+                headers[key] = value
             
+            # Get body
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = b''
+            if content_length > 0:
+                body = self.rfile.read(content_length)
+            
+            # Build WSGI environ
+            environ = {
+                'REQUEST_METHOD': method,
+                'PATH_INFO': path,
+                'QUERY_STRING': query_string,
+                'SERVER_NAME': 'localhost',
+                'SERVER_PORT': '80',
+                'wsgi.version': (1, 0),
+                'wsgi.url_scheme': 'https',
+                'wsgi.input': BytesIO(body) if body else None,
+                'wsgi.errors': None,
+                'wsgi.multithread': False,
+                'wsgi.multiprocess': True,
+                'wsgi.run_once': False,
+            }
+            
+            # Add headers to environ
+            for key, value in headers.items():
+                key_upper = key.upper().replace('-', '_')
+                if key_upper not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
+                    environ['HTTP_' + key_upper] = value
+                else:
+                    environ[key_upper] = value
+            
+            if body:
+                environ['CONTENT_LENGTH'] = str(len(body))
+            
+            # Process with Flask
+            with app.request_context(environ):
+                response = app.full_dispatch_request()
+                
+                # Send response
+                self.send_response(response.status_code)
+                
+                # Add CORS headers
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                
+                # Send other headers
+                for key, value in response.headers:
+                    self.send_header(key, value)
+                
+                self.end_headers()
+                self.wfile.write(response.get_data())
+                
         except Exception as e:
             import traceback
             error_trace = traceback.format_exc()
             print(f"Error in handler: {error_trace}")
-            res.statusCode = 500
-            res.setHeader('Content-Type', 'application/json')
-            res.setHeader('Access-Control-Allow-Origin', '*')
-            res.end(json.dumps({
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
                 'message': str(e),
                 'error': 'Internal server error'
-            }))
+            }).encode('utf-8'))
+    
+    def log_message(self, format, *args):
+        # Suppress default logging
+        pass

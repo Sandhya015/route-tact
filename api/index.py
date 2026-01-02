@@ -4,6 +4,7 @@ Main Vercel serverless function - handles all API routes
 import sys
 import os
 import json
+from io import BytesIO
 
 # Load environment variables
 try:
@@ -431,52 +432,14 @@ def update_or_delete_service(service_id):
 
 # Vercel serverless function handler
 def handler(req):
-    """Vercel serverless function handler - simplified format"""
-    # Vercel passes a request object with: method, path, headers, body
-    # We need to convert it to WSGI format for Flask
-    
-    method = getattr(req, 'method', 'GET')
-    path = getattr(req, 'path', '/')
-    headers = getattr(req, 'headers', {})
-    body = getattr(req, 'body', None)
-    
-    # Remove /api prefix if present
-    if path.startswith('/api'):
-        path = path[4:] or '/'
-    
-    # Build WSGI environ
-    environ = {
-        'REQUEST_METHOD': method,
-        'PATH_INFO': path,
-        'QUERY_STRING': '',
-        'SERVER_NAME': 'localhost',
-        'SERVER_PORT': '80',
-        'wsgi.version': (1, 0),
-        'wsgi.url_scheme': 'https',
-        'wsgi.input': None,
-        'wsgi.errors': None,
-        'wsgi.multithread': False,
-        'wsgi.multiprocess': True,
-        'wsgi.run_once': False,
-    }
-    
-    # Add headers
-    for key, value in headers.items():
-        key_upper = key.upper().replace('-', '_')
-        if key_upper not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
-            environ['HTTP_' + key_upper] = value
-        else:
-            environ[key_upper] = value
-    
-    # Handle body
-    if body:
-        if isinstance(body, str):
-            body = body.encode('utf-8')
-        environ['wsgi.input'] = body
-        environ['CONTENT_LENGTH'] = str(len(body))
-    
-    # Process with Flask
-    with app.request_context(environ):
+    """Vercel serverless function handler"""
+    # Use Flask's test client for better compatibility
+    with app.test_request_context(
+        path=req.path if hasattr(req, 'path') else '/',
+        method=req.method if hasattr(req, 'method') else 'GET',
+        headers=req.headers if hasattr(req, 'headers') else {},
+        data=req.body if hasattr(req, 'body') else None
+    ):
         try:
             response = app.full_dispatch_request()
             return {
@@ -493,7 +456,6 @@ def handler(req):
                 'headers': {'Content-Type': 'application/json'},
                 'body': json.dumps({
                     'message': str(e),
-                    'error': 'Internal server error',
-                    'trace': error_trace
+                    'error': 'Internal server error'
                 })
             }

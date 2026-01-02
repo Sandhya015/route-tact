@@ -3,11 +3,20 @@ Main Vercel serverless function - handles all API routes
 """
 import sys
 import os
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+import json
+
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass
 
 # Add utils to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 from utils.db import get_db
 from utils.auth import hash_password, verify_password, generate_token, get_user_from_token
@@ -436,19 +445,27 @@ def update_or_delete_service(service_id):
 
 # Vercel serverless function handler
 def handler(req):
-    """Main handler for all API routes - Vercel format"""
-    from werkzeug.wrappers import Request
+    """Vercel serverless function handler"""
+    from werkzeug.wrappers import Request, Response
     
-    # Get path from request
-    path = req.path if hasattr(req, 'path') else req.get('path', '/')
+    # Extract path from request
+    if hasattr(req, 'path'):
+        path = req.path
+    elif isinstance(req, dict):
+        path = req.get('path', '/')
+    else:
+        path = '/'
     
-    # Remove /api prefix if present (Vercel already routes to /api)
+    # Remove /api prefix if present
     if path.startswith('/api'):
         path = path[4:] or '/'
     
     # Build WSGI environ
+    method = req.method if hasattr(req, 'method') else req.get('method', 'GET')
+    headers = req.headers if hasattr(req, 'headers') else req.get('headers', {})
+    
     environ = {
-        'REQUEST_METHOD': req.method if hasattr(req, 'method') else req.get('method', 'GET'),
+        'REQUEST_METHOD': method,
         'PATH_INFO': path,
         'QUERY_STRING': '',
         'SERVER_NAME': 'localhost',
@@ -463,7 +480,6 @@ def handler(req):
     }
     
     # Add headers
-    headers = req.headers if hasattr(req, 'headers') else req.get('headers', {})
     for key, value in headers.items():
         key_upper = key.upper().replace('-', '_')
         if key_upper not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
@@ -471,19 +487,20 @@ def handler(req):
         else:
             environ[key_upper] = value
     
-    # Add body if present
+    # Handle body
+    body = None
     if hasattr(req, 'body'):
         body = req.body
-    elif 'body' in req:
+    elif isinstance(req, dict) and 'body' in req:
         body = req['body']
-    else:
-        body = None
     
     if body:
+        if isinstance(body, str):
+            body = body.encode('utf-8')
         environ['wsgi.input'] = body
-        environ['CONTENT_LENGTH'] = str(len(body) if isinstance(body, (str, bytes)) else 0)
+        environ['CONTENT_LENGTH'] = str(len(body))
     
-    # Create request and process
+    # Process request
     with Request(environ) as werkzeug_req:
         with app.request_context(environ):
             try:
@@ -494,9 +511,11 @@ def handler(req):
                     'body': response.get_data(as_text=True)
                 }
             except Exception as e:
+                import traceback
+                error_msg = str(e)
+                traceback.print_exc()
                 return {
                     'statusCode': 500,
                     'headers': {'Content-Type': 'application/json'},
-                    'body': json.dumps({'message': str(e), 'error': 'Internal server error'})
+                    'body': json.dumps({'message': error_msg, 'error': 'Internal server error'})
                 }
-

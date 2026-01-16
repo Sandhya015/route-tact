@@ -1,4 +1,4 @@
-# 🚜 Rural Services Marketplace - "RuralConnect"
+#  Rural Services Marketplace - "RuralConnect"
 
 A location-based marketplace connecting rural service providers (Tractors, JCBs, Autos, etc.) with customers in rural areas.
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { Search, MapPin, Phone, MessageCircle, Tractor, Wrench, Truck } from 'lucide-react'
+import { Search, MapPin, Phone, MessageCircle, Tractor, Wrench, Truck, Sparkles, Zap } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const SearchServices = () => {
@@ -12,6 +12,10 @@ const SearchServices = () => {
   const [serviceType, setServiceType] = useState('')
   const [location, setLocation] = useState({ lat: null, lng: null })
   const [showSuggestions, setShowSuggestions] = useState(true)
+  const [searchMode, setSearchMode] = useState('regular') // 'regular' or 'ai'
+  const [aiQuery, setAiQuery] = useState('')
+  const [extractedIntent, setExtractedIntent] = useState(null)
+  const [summary, setSummary] = useState('')
   const navigate = useNavigate()
   const { user } = useAuth()
 
@@ -94,8 +98,54 @@ const SearchServices = () => {
       })
       setServices(response.data || [])
       setShowSuggestions(false) // Hide suggestions after search
+      setExtractedIntent(null)
+      setSummary('')
     } catch (error) {
       console.error('Search error:', error)
+      console.error('Error details:', error.response?.data)
+      alert('Failed to search services: ' + (error.response?.data?.message || error.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleAISearch = async () => {
+    if (!location.lat || !location.lng) {
+      alert('Please allow location access to search services')
+      return
+    }
+
+    if (!aiQuery.trim()) {
+      alert('Please enter your search query')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const token = localStorage.getItem('token')
+      const response = await axios.post(
+        `${API_URL}/services/ai-search`,
+        {
+          query: aiQuery,
+          location: {
+            lat: location.lat,
+            lng: location.lng
+          },
+          radius: 50
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        }
+      )
+      setServices(response.data.results || [])
+      setExtractedIntent(response.data.extractedIntent || null)
+      setSummary(response.data.summary || '')
+      setShowSuggestions(false) // Hide suggestions after search
+    } catch (error) {
+      console.error('AI Search error:', error)
       console.error('Error details:', error.response?.data)
       alert('Failed to search services: ' + (error.response?.data?.message || error.message))
     } finally {
@@ -120,46 +170,178 @@ const SearchServices = () => {
         </p>
       </div>
 
-      {/* Search Bar */}
-      <div className="glass-card p-6 mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by name, village..."
-                className="glass-input pl-10"
-              />
-            </div>
-          </div>
-
-          <div>
-            <select
-              value={serviceType}
-              onChange={(e) => setServiceType(e.target.value)}
-              className="glass-input"
-            >
-              <option value="">All Services</option>
-              {serviceTypes.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
+      {/* Search Mode Tabs */}
+      <div className="glass-card p-4 mb-6">
+        <div className="flex space-x-4">
           <button
-            onClick={handleSearch}
-            disabled={loading}
-            className="glass-button disabled:opacity-50"
+            onClick={() => {
+              setSearchMode('regular')
+              setServices([])
+              setExtractedIntent(null)
+              setSummary('')
+            }}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
+              searchMode === 'regular'
+                ? 'bg-primary-600 text-white'
+                : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+            }`}
           >
-            {loading ? 'Searching...' : 'Search'}
+            <Search className="w-4 h-4" />
+            <span>Regular Search</span>
+          </button>
+          <button
+            onClick={() => {
+              setSearchMode('ai')
+              setServices([])
+              setExtractedIntent(null)
+              setSummary('')
+            }}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
+              searchMode === 'ai'
+                ? 'bg-primary-600 text-white'
+                : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>AI Search</span>
+            <span className="text-xs bg-yellow-500 text-white px-2 py-0.5 rounded-full">NEW</span>
           </button>
         </div>
       </div>
+
+      {/* Search Bar */}
+      <div className="glass-card p-6 mb-8">
+        {searchMode === 'regular' ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by name, village..."
+                  className="glass-input pl-10"
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                />
+              </div>
+            </div>
+
+            <div>
+              <select
+                value={serviceType}
+                onChange={(e) => setServiceType(e.target.value)}
+                className="glass-input"
+              >
+                <option value="">All Services</option>
+                {serviceTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={handleSearch}
+              disabled={loading}
+              className="glass-button disabled:opacity-50"
+            >
+              {loading ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="relative">
+              <Sparkles className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-500" />
+              <textarea
+                value={aiQuery}
+                onChange={(e) => setAiQuery(e.target.value)}
+                placeholder="Describe what you need in natural language...&#10;Example: 'I need a tractor to plow my 5-acre rice field this week. Budget around 500 per hour.'"
+                className="glass-input pl-10 min-h-[100px] resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                💡 AI understands your requirements - just describe what you need!
+              </p>
+              <button
+                onClick={handleAISearch}
+                disabled={loading || !aiQuery.trim()}
+                className="glass-button disabled:opacity-50 flex items-center space-x-2"
+              >
+                {loading ? (
+                  <>
+                    <Zap className="w-4 h-4 animate-pulse" />
+                    <span>AI Searching...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>AI Search</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* AI Extracted Intent Display */}
+      {extractedIntent && (
+        <div className="glass-card p-4 mb-6 bg-primary-50 dark:bg-primary-900/20 border-2 border-primary-200 dark:border-primary-800">
+          <div className="flex items-center space-x-2 mb-3">
+            <Zap className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            <h3 className="font-semibold text-primary-700 dark:text-primary-300">AI Understood:</h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            {extractedIntent.serviceType && (
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Service:</span>
+                <span className="ml-2 font-medium capitalize">{extractedIntent.serviceType}</span>
+              </div>
+            )}
+            {extractedIntent.purpose && (
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Purpose:</span>
+                <span className="ml-2 font-medium capitalize">{extractedIntent.purpose}</span>
+              </div>
+            )}
+            {extractedIntent.crop && (
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Crop:</span>
+                <span className="ml-2 font-medium capitalize">{extractedIntent.crop}</span>
+              </div>
+            )}
+            {extractedIntent.acreage && (
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Acreage:</span>
+                <span className="ml-2 font-medium">{extractedIntent.acreage} acres</span>
+              </div>
+            )}
+            {extractedIntent.urgency && (
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Urgency:</span>
+                <span className="ml-2 font-medium capitalize">{extractedIntent.urgency}</span>
+              </div>
+            )}
+            {extractedIntent.budget && (
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Budget:</span>
+                <span className="ml-2 font-medium">₹{extractedIntent.budget}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* AI Summary */}
+      {summary && (
+        <div className="glass-card p-4 mb-6 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800">
+          <p className="text-sm text-green-800 dark:text-green-200">{summary}</p>
+        </div>
+      )}
 
       {/* Auto-Suggestions Section */}
       {showSuggestions && suggestions.length > 0 && (
@@ -244,7 +426,15 @@ const SearchServices = () => {
           {services.map((service) => {
             const IconComponent = serviceTypes.find(t => t.value === service.type)?.icon || Tractor
             return (
-              <div key={service._id} className="glass-card p-6 hover:scale-105 transition-transform">
+              <div key={service._id} className="glass-card p-6 hover:scale-105 transition-transform relative">
+                {service.relevanceScore && searchMode === 'ai' && (
+                  <div className="absolute top-3 right-3">
+                    <span className="text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 font-semibold">
+                      Match: {(service.relevanceScore * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                )}
+                
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-3">
                     <div className="w-12 h-12 rounded-lg gradient-bg flex items-center justify-center">
@@ -267,6 +457,14 @@ const SearchServices = () => {
                   {service.distance && (
                     <div className="text-sm text-primary-600 dark:text-primary-400">
                       {service.distance.toFixed(1)} km away
+                    </div>
+                  )}
+                  {service.aiExplanation && (
+                    <div className="text-sm text-slate-700 dark:text-slate-300 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg mt-2">
+                      <div className="flex items-start space-x-2">
+                        <Sparkles className="w-4 h-4 text-primary-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs">{service.aiExplanation}</p>
+                      </div>
                     </div>
                   )}
                   <div className="text-lg font-bold text-primary-600 dark:text-primary-400">

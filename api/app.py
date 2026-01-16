@@ -16,6 +16,8 @@ CORS(app)
 # Import utilities
 from utils.db import get_db
 from utils.auth import hash_password, verify_password, generate_token, get_user_from_token
+from utils.helpers import format_service_response
+from utils.ai import extract_intent, generate_explanation, generate_summary
 from datetime import datetime
 from bson import ObjectId
 
@@ -184,7 +186,6 @@ def search_services():
         
         services = list(db.services.find(query).limit(50))
         
-        from utils.helpers import format_service_response
         results = []
         for service in services:
             provider = db.users.find_one({'_id': ObjectId(service['providerId'])})
@@ -522,6 +523,118 @@ def update_or_delete_service(service_id):
             return jsonify({'message': 'Service deleted successfully'}), 200
         
     except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+@app.route('/api/services/ai-search', methods=['POST', 'OPTIONS'])
+def ai_search_services():
+    """AI-powered natural language service search"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    try:
+        db = get_db()
+        if db is None:
+            return jsonify({'message': 'Database connection failed'}), 500
+        
+        data = request.get_json()
+        if not data or not data.get('query'):
+            return jsonify({'message': 'Query is required'}), 400
+        
+        query_text = data.get('query', '').strip()
+        lat = float(data.get('location', {}).get('lat', 0))
+        lng = float(data.get('location', {}).get('lng', 0))
+        radius = float(data.get('radius', 50))  # Default 50km
+        
+        if not lat or not lng:
+            return jsonify({'message': 'Location coordinates are required'}), 400
+        
+        # Extract intent using AI
+        extracted_intent = extract_intent(query_text)
+        
+        # Build database query based on extracted intent
+        db_query = {
+            'available': True,
+            'location': {
+                '$near': {
+                    '$geometry': {
+                        'type': 'Point',
+                        'coordinates': [lng, lat]
+                    },
+                    '$maxDistance': radius * 1000  # Convert km to meters
+                }
+            }
+        }
+        
+        # Add service type filter if extracted
+        if extracted_intent.get('serviceType'):
+            db_query['type'] = extracted_intent['serviceType']
+        
+        # Query database
+        services = list(db.services.find(db_query).limit(50))
+        
+        # Format results and add provider info
+        results = []
+        for service in services:
+            provider = db.users.find_one({'_id': ObjectId(service['providerId'])})
+            if not provider:
+                continue
+            
+            service_data = format_service_response(service, lat, lng)
+            service_data['providerName'] = provider.get('name', 'Unknown')
+            service_data['phone'] = provider.get('phone', '')
+            
+            # Filter by budget if specified
+            customer_budget = extracted_intent.get('budget')
+            if customer_budget:
+                service_price = service_data.get('pricePerHour') or service_data.get('pricePerTrip', 0)
+                # Allow ±200 range for budget matching
+                if service_price > customer_budget + 200:
+                    continue
+            
+            results.append(service_data)
+        
+        # Sort by distance
+        results.sort(key=lambda x: x.get('distance', float('inf')))
+        
+        # Generate AI explanations for top results (limit to top 5 for cost efficiency)
+        top_results = results[:5]
+        for service_data in top_results:
+            try:
+                explanation = generate_explanation(service_data, extracted_intent)
+                service_data['aiExplanation'] = explanation
+                # Calculate relevance score (0-1) based on distance and price match
+                distance_score = 1.0 / (1.0 + service_data.get('distance', 10))
+                price_score = 1.0
+                if customer_budget:
+                    service_price = service_data.get('pricePerHour') or service_data.get('pricePerTrip', 0)
+                    price_diff = abs(service_price - customer_budget)
+                    price_score = max(0, 1.0 - (price_diff / customer_budget))
+                service_data['relevanceScore'] = round((distance_score * 0.6 + price_score * 0.4), 2)
+            except Exception as e:
+                print(f"Error generating explanation: {e}")
+                service_data['aiExplanation'] = "Good match based on location and availability."
+                service_data['relevanceScore'] = 0.5
+        
+        # Add explanations to remaining results (simple)
+        for service_data in results[5:]:
+            service_data['aiExplanation'] = "Good match based on location and availability."
+            service_data['relevanceScore'] = 0.4
+        
+        # Re-sort by relevance score
+        results.sort(key=lambda x: x.get('relevanceScore', 0), reverse=True)
+        
+        # Generate summary
+        summary = generate_summary(results, extracted_intent)
+        
+        return jsonify({
+            'extractedIntent': extracted_intent,
+            'results': results,
+            'summary': summary,
+            'total': len(results)
+        }), 200
+        
+    except Exception as e:
+        print(f"AI search error: {e}")
         return jsonify({'message': str(e)}), 500
 
 if __name__ == '__main__':
